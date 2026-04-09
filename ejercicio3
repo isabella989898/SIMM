@@ -1,0 +1,194 @@
+--Ejercicio 3 
+-- Declaraciones previas para evitar errores de referencia
+-- 1. Primero borramos las TABLAS (las que contienen los datos)
+-- Empezamos por las tablas de asociación que dependen de otras
+DROP TABLE moduls_curs_tab CASCADE CONSTRAINTS;
+DROP TABLE participa_tab CASCADE CONSTRAINTS;
+DROP TABLE coordina_tab CASCADE CONSTRAINTS;
+
+-- Luego las tablas principales
+DROP TABLE cursos_tab CASCADE CONSTRAINTS;
+DROP TABLE moduls_tab CASCADE CONSTRAINTS;
+DROP TABLE empleats_tab CASCADE CONSTRAINTS;
+DROP TABLE clients_tab CASCADE CONSTRAINTS;
+
+-- 2. Ahora borramos los TIPOS DE ASOCIACIÓN
+DROP TYPE T_MODULS_CURS FORCE;
+DROP TYPE T_PARTICIPA FORCE;
+DROP TYPE T_COORDINA FORCE;
+
+-- 3. Borramos los TIPOS "HIJOS" (los que están abajo en la jerarquía)
+DROP TYPE T_CURS_HISTORIC FORCE;
+DROP TYPE T_CURS_ACTIU FORCE;
+DROP TYPE T_FORMADOR FORCE;
+DROP TYPE T_COORDINADOR FORCE;
+DROP TYPE T_TECNIC FORCE;
+
+-- 4. Por último, borramos los TIPOS "PADRE" (la base)
+DROP TYPE T_MODUL FORCE;
+DROP TYPE T_CURS FORCE;
+DROP TYPE T_EMPLEAT FORCE;
+DROP TYPE T_CLIENT FORCE;
+
+/
+CREATE OR REPLACE TYPE T_CURS;
+/
+CREATE OR REPLACE TYPE T_EMPLEAT;
+/
+CREATE OR REPLACE TYPE T_MODUL;
+/
+CREATE OR REPLACE TYPE T_CURS_ACTIU;
+/
+
+-- 1. CLIENT
+CREATE OR REPLACE TYPE T_CLIENT AS OBJECT (
+    nif VARCHAR2(10),
+    nom VARCHAR2(50),
+    adreca VARCHAR2(100),
+    telefon VARCHAR2(15),
+    MEMBER FUNCTION numCursos RETURN NUMBER
+);
+/
+
+-- 2. EMPLEAT (Base para Formador, Coordinador, Tecnic)
+CREATE OR REPLACE TYPE T_EMPLEAT AS OBJECT (
+    dni VARCHAR2(10),
+    nom VARCHAR2(50),
+    cognoms VARCHAR2(50),
+    dataContracte DATE,
+    telefon VARCHAR2(15),
+    MEMBER FUNCTION antiguitat RETURN NUMBER
+) NOT FINAL;
+/
+
+-- Subclases de Empleat
+CREATE OR REPLACE TYPE T_FORMADOR UNDER T_EMPLEAT (especialitat VARCHAR2(50), nivell VARCHAR2(20));
+/
+CREATE OR REPLACE TYPE T_COORDINADOR UNDER T_EMPLEAT (area VARCHAR2(50), despatx VARCHAR2(20));
+/
+CREATE OR REPLACE TYPE T_TECNIC UNDER T_EMPLEAT (certificacio VARCHAR2(50), sistema VARCHAR2(50));
+/
+
+-- 3. CURS (Base para Actiu y Historic)
+CREATE OR REPLACE TYPE T_CURS AS OBJECT (
+    idCurs NUMBER,
+    nom VARCHAR2(100),
+    hores NUMBER,
+    preu NUMBER,
+    ref_coordinador REF T_COORDINADOR,
+    MEMBER FUNCTION coordinador RETURN VARCHAR2,
+    MEMBER FUNCTION actiu RETURN VARCHAR2
+) NOT FINAL;
+/
+
+CREATE OR REPLACE TYPE T_CURS_ACTIU UNDER T_CURS (
+    dataInici DATE,
+    dataFiPrevista DATE,
+    modalitat VARCHAR2(20),
+    MEMBER FUNCTION modulActual RETURN VARCHAR2
+);
+/
+
+CREATE OR REPLACE TYPE T_CURS_HISTORIC UNDER T_CURS (
+    dataFinal DATE,
+    valoracio NUMBER
+);
+/
+
+-- 4. MODUL
+CREATE OR REPLACE TYPE T_MODUL AS OBJECT (
+    idModul NUMBER,
+    nom VARCHAR2(50),
+    dataInici DATE,
+    dataFi DATE,
+    MEMBER FUNCTION numCursos RETURN NUMBER
+);
+/
+
+-- 5. TYPES PARA ASOCIACIONES (Tablas de unión)
+CREATE OR REPLACE TYPE T_COORDINA AS OBJECT (
+    ref_curs REF T_CURS,
+    ref_empleat REF T_EMPLEAT
+);
+/
+
+CREATE OR REPLACE TYPE T_PARTICIPA AS OBJECT (
+    ref_curs REF T_CURS,
+    ref_empleat REF T_EMPLEAT
+);
+/
+
+CREATE OR REPLACE TYPE T_MODULS_CURS AS OBJECT (
+    ref_curs_actiu REF T_CURS_ACTIU,
+    ref_modul REF T_MODUL
+);
+/
+CREATE TABLE clients_tab OF T_CLIENT (PRIMARY KEY (nif));
+CREATE TABLE empleats_tab OF T_EMPLEAT (PRIMARY KEY (dni));
+CREATE TABLE moduls_tab OF T_MODUL (PRIMARY KEY (idModul));
+CREATE TABLE cursos_tab OF T_CURS (PRIMARY KEY (idCurs));
+-- Tablas de asociaciones
+CREATE TABLE coordina_tab OF T_COORDINA;
+CREATE TABLE participa_tab OF T_PARTICIPA;
+CREATE TABLE moduls_curs_tab OF T_MODULS_CURS;
+
+-- Body Empleat
+CREATE OR REPLACE TYPE BODY T_EMPLEAT AS
+    MEMBER FUNCTION antiguitat RETURN NUMBER IS
+    BEGIN
+        RETURN EXTRACT(YEAR FROM SYSDATE) - EXTRACT(YEAR FROM self.dataContracte);
+    END;
+END;
+/
+
+-- Body Curs
+CREATE OR REPLACE TYPE BODY T_CURS AS
+    MEMBER FUNCTION coordinador RETURN VARCHAR2 IS
+        v_nom VARCHAR2(100);
+    BEGIN
+        SELECT c.nom || ' ' || c.cognoms INTO v_nom 
+        FROM empleats_tab c WHERE REF(c) = self.ref_coordinador;
+        RETURN v_nom;
+    EXCEPTION WHEN OTHERS THEN RETURN 'Sense coordinador';
+    END;
+
+    MEMBER FUNCTION actiu RETURN VARCHAR2 IS
+        v_count NUMBER;
+    BEGIN
+        SELECT COUNT(*) INTO v_count FROM cursos_tab WHERE idCurs = self.idCurs AND VALUE(self) IS OF (T_CURS_ACTIU);
+        IF v_count > 0 THEN RETURN 'T'; ELSE RETURN 'F'; END IF;
+    END;
+END;
+/
+
+-- Body Curs Actiu
+CREATE OR REPLACE TYPE BODY T_CURS_ACTIU AS
+    MEMBER FUNCTION modulActual RETURN VARCHAR2 IS
+        v_nom_modul VARCHAR2(50);
+    BEGIN
+        SELECT m.nom INTO v_nom_modul
+        FROM moduls_curs_tab mc, moduls_tab m
+        WHERE mc.ref_curs_actiu = REF(self) AND mc.ref_modul = REF(m) AND m.dataFi IS NULL;
+        RETURN v_nom_modul;
+    EXCEPTION WHEN OTHERS THEN RETURN 'Cap mòdul actiu';
+    END;
+END;
+/
+
+-- Body Modul
+CREATE OR REPLACE TYPE BODY T_MODUL AS
+    MEMBER FUNCTION numCursos RETURN NUMBER IS
+        v_count NUMBER;
+    BEGIN
+        SELECT COUNT(*) INTO v_count FROM moduls_curs_tab WHERE ref_modul = REF(self);
+        RETURN v_count;
+    END;
+END;
+/
+-- 1. Insertar un Coordinador (que es un Empleat)
+INSERT INTO empleats_tab VALUES (T_COORDINADOR('12345678A', 'Joan', 'Garcia', TO_DATE('2015-01-01','YYYY-MM-DD'), '600111222', 'Informatica', 'D-101'));
+
+
+SELECT e.nom, e.cognoms, e.antiguitat() AS anys_empresa
+FROM empleats_tab e
+WHERE e.dni = '12345678A';
