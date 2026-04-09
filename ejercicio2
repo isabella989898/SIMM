@@ -1,0 +1,206 @@
+
+--Ejercicio 2
+CREATE OR REPLACE TYPE T_PERSONA AS OBJECT (
+    codi NUMBER,
+    dni VARCHAR2(10),
+    nom VARCHAR2(50),
+    adreca VARCHAR2(100),
+    telefon VARCHAR2(15)
+) NOT FINAL;
+/
+
+-- Nivel 1: Hijos de Persona
+CREATE OR REPLACE TYPE T_EMPLEAT UNDER T_PERSONA (
+    sou NUMBER,
+    data_contracte DATE,
+    correu_corporatiu VARCHAR2(100),
+    departament VARCHAR2(50),
+    MEMBER FUNCTION antiguitat RETURN NUMBER
+) NOT FINAL;
+/
+
+CREATE OR REPLACE TYPE T_ALUMNE UNDER T_PERSONA (
+    num_expedient VARCHAR2(20),
+    correu VARCHAR2(100),
+    data_naixement DATE,
+    MEMBER FUNCTION edat RETURN NUMBER
+) NOT FINAL;
+/
+
+-- Nivel 2: Hijos de Empleat
+CREATE OR REPLACE TYPE T_INVESTIGADOR UNDER T_EMPLEAT (
+    especialitat VARCHAR2(50),
+    num_publicacions NUMBER,
+    MEMBER FUNCTION nivell_recerca RETURN VARCHAR2
+);
+/
+
+CREATE OR REPLACE TYPE T_ADMINISTRATIU UNDER T_EMPLEAT (
+    carrec VARCHAR2(50),
+    tipus_jornada VARCHAR2(20),
+    MEMBER FUNCTION sou_anual RETURN NUMBER
+);
+/
+
+-- Nivel 2: Hijos de Alumne (con Atributos y Declaración de Constructor)
+CREATE OR REPLACE TYPE T_ALUMNE_GRAU UNDER T_ALUMNE (
+    titulacio VARCHAR2(50),
+    durada NUMBER,
+    any_1a_matricula NUMBER,
+    CONSTRUCTOR FUNCTION T_ALUMNE_GRAU(codi NUMBER, dni VARCHAR2, nom VARCHAR2, adreca VARCHAR2, telefon VARCHAR2, num_expedient VARCHAR2, correu VARCHAR2, data_naixement DATE, titulacio VARCHAR2) RETURN SELF AS RESULT,
+    MEMBER FUNCTION anys_restants RETURN NUMBER
+);
+/
+
+CREATE OR REPLACE TYPE T_ALUMNE_MASTER UNDER T_ALUMNE (
+    programa VARCHAR2(100),
+    especialitat VARCHAR2(50),
+    num_moduls NUMBER,
+    CONSTRUCTOR FUNCTION T_ALUMNE_MASTER(codi NUMBER, dni VARCHAR2, nom VARCHAR2, adreca VARCHAR2, telefon VARCHAR2, num_expedient VARCHAR2, correu VARCHAR2, data_naixement DATE) RETURN SELF AS RESULT,
+    MEMBER FUNCTION resum_estudis RETURN VARCHAR2
+);
+/
+-- Cuerpo para Investigador (Soluciona tu error actual)
+CREATE OR REPLACE TYPE BODY T_INVESTIGADOR AS
+    MEMBER FUNCTION nivell_recerca RETURN VARCHAR2 IS
+    BEGIN
+        IF self.num_publicacions < 5 THEN 
+            RETURN 'Inicial';
+        ELSIF self.num_publicacions <= 15 THEN 
+            RETURN 'Consolidat';
+        ELSE 
+            RETURN 'Senior';
+        END IF;
+    END;
+END;
+/
+-- Cuerpo para Alumne Grau (Constructor y Función)
+CREATE OR REPLACE TYPE BODY T_ALUMNE_GRAU AS
+    CONSTRUCTOR FUNCTION T_ALUMNE_GRAU(codi NUMBER, dni VARCHAR2, nom VARCHAR2, adreca VARCHAR2, telefon VARCHAR2, num_expedient VARCHAR2, correu VARCHAR2, data_naixement DATE, titulacio VARCHAR2) RETURN SELF AS RESULT IS
+    BEGIN
+        self.codi := codi; self.dni := dni; self.nom := nom; self.adreca := adreca; self.telefon := telefon;
+        self.num_expedient := num_expedient; self.correu := correu; self.data_naixement := data_naixement;
+        self.titulacio := titulacio;
+        self.durada := 4; 
+        self.any_1a_matricula := EXTRACT(YEAR FROM SYSDATE);
+        RETURN;
+    END;
+    MEMBER FUNCTION anys_restants RETURN NUMBER IS
+    BEGIN
+        RETURN self.durada - (EXTRACT(YEAR FROM SYSDATE) - self.any_1a_matricula);
+    END;
+END;
+/
+
+-- Cuerpo para Alumne Master (ESTE ES EL QUE TE DA EL ERROR)
+CREATE OR REPLACE TYPE BODY T_ALUMNE_MASTER AS
+    CONSTRUCTOR FUNCTION T_ALUMNE_MASTER(codi NUMBER, dni VARCHAR2, nom VARCHAR2, adreca VARCHAR2, telefon VARCHAR2, num_expedient VARCHAR2, correu VARCHAR2, data_naixement DATE) RETURN SELF AS RESULT IS
+    BEGIN
+        self.codi := codi; self.dni := dni; self.nom := nom; self.adreca := adreca; self.telefon := telefon;
+        self.num_expedient := num_expedient; self.correu := correu; self.data_naixement := data_naixement;
+        self.programa := 'Màster en Enginyeria del Software'; 
+        self.especialitat := 'Arquitectura';
+        self.num_moduls := 10;
+        RETURN;
+    END;
+    MEMBER FUNCTION resum_estudis RETURN VARCHAR2 IS
+    BEGIN
+        RETURN 'Programa: ' || self.programa || ', Esp: ' || self.especialitat || ', Mòduls: ' || self.num_moduls;
+    END;
+END;
+/
+-- Cuerpo para Administratiu (Para que no te falle el siguiente)
+CREATE OR REPLACE TYPE BODY T_ADMINISTRATIU AS
+    MEMBER FUNCTION sou_anual RETURN NUMBER IS
+    BEGIN
+        RETURN self.sou * 14;
+    END;
+END;
+/
+-- Cuerpo para Alumne (Contiene la función edat que heredarán los demás)
+CREATE OR REPLACE TYPE BODY T_ALUMNE AS
+    MEMBER FUNCTION edat RETURN NUMBER IS
+    BEGIN
+        RETURN EXTRACT(YEAR FROM SYSDATE) - EXTRACT(YEAR FROM self.data_naixement);
+    END;
+END;
+/
+
+-- Cuerpo para Empleat (Contiene la función antiguitat que heredarán los demás)
+CREATE OR REPLACE TYPE BODY T_EMPLEAT AS
+    MEMBER FUNCTION antiguitat RETURN NUMBER IS
+    BEGIN
+        RETURN EXTRACT(YEAR FROM SYSDATE) - EXTRACT(YEAR FROM self.data_contracte);
+    END;
+END;
+/
+-- Insertamos un investigador de prueba
+INSERT INTO investigadors_tab VALUES (
+    T_INVESTIGADOR(4, '4444R', 'Dr. Smith', 'C/ Laboratori', '6004', 3000, TO_DATE('2010-01-01','YYYY-MM-DD'), 'smith@uib.cat', 'Bio', 'Genètica', 20)
+);
+
+-- Ahora la consulta ya no dará error
+SELECT p.nom, p.nivell_recerca() as nivel 
+FROM investigadors_tab p;
+
+-- 1. Limpiamos la tabla para el experimento
+DELETE FROM persones_tab;
+
+-- 2. Insertamos un Administrativo
+INSERT INTO persones_tab VALUES (
+    T_ALUMNE_MASTER(202, '22222222B', 'Pere Joan', 'C/ Inca 12', '971000222', 'EXP-99', 'pj@uib.es', TO_DATE('1995-05-20','YYYY-MM-DD'))
+);
+-- 3. Insertamos un Alumno de Master (usando el constructor que creamos)
+INSERT INTO persones_tab VALUES (
+    T_ALUMNE_MASTER(202, '22222222B', 'Pere Joan', 'C/ Inca 12', '971000222', 'EXP-99', 'pj@uib.es', TO_DATE('1995-05-20','YYYY-MM-DD'))
+);
+
+-- 4. Insertamos un Investigador
+INSERT INTO persones_tab VALUES (
+    T_INVESTIGADOR(303, '33333333C', 'Dr. Einstein', 'Lab 4', '971000333', 
+                    4000, TO_DATE('2005-01-01','YYYY-MM-DD'), 'albert@uib.es', 'Física', 'Relativitat', 50)
+);
+SELECT 
+    p.nom,
+    CASE 
+        WHEN VALUE(p) IS OF (T_ADMINISTRATIU) THEN 'Personal d''Administració'
+        WHEN VALUE(p) IS OF (T_ALUMNE_MASTER) THEN 'Estudiant de Màster'
+        WHEN VALUE(p) IS OF (T_INVESTIGADOR) THEN 'Investigador Senior'
+        ELSE 'Altres'
+    END AS tipus_usuari,
+    -- Aquí está el truco: calculamos según el tipo
+    CASE 
+        WHEN VALUE(p) IS OF (T_ALUMNE) THEN TO_CHAR(TREAT(VALUE(p) AS T_ALUMNE).edat())
+        WHEN VALUE(p) IS OF (T_EMPLEAT) THEN 'Antiguitat: ' || TREAT(VALUE(p) AS T_EMPLEAT).antiguitat() || ' anys'
+        ELSE 'N/A'
+    END AS info_adicional
+FROM persones_tab p;
+
+SELECT 
+    p.nom,
+    -- Si es Investigador, vemos su nivel de publicaciones
+    CASE 
+        WHEN VALUE(p) IS OF (T_INVESTIGADOR) 
+        THEN TREAT(VALUE(p) AS T_INVESTIGADOR).nivell_recerca()
+        -- Si es Master, vemos su resumen de estudios
+        WHEN VALUE(p) IS OF (T_ALUMNE_MASTER) 
+        THEN TREAT(VALUE(p) AS T_ALUMNE_MASTER).resum_estudis()
+        -- Si es Administrativo, vemos su sueldo anual
+        WHEN VALUE(p) IS OF (T_ADMINISTRATIU) 
+        THEN 'Sou anual: ' || TREAT(VALUE(p) AS T_ADMINISTRATIU).sou_anual() || '€'
+        ELSE '---'
+    END AS info_especifica_clase
+FROM persones_tab p;
+
+-- Insertamos solo con los datos básicos, el constructor hará el resto
+INSERT INTO persones_tab VALUES (
+    T_ALUMNE_GRAU(506, '55555555E', 'Carme Pons', 'C/ Menorca 1', '600111222', 'EXP-G-1', 'carme@uib.cat', TO_DATE('2003-02-20','YYYY-MM-DD'), 'Dret')
+);
+
+-- Comprobamos que años_restants() funciona (4 años - 0 transcurridos = 4)
+SELECT 
+    p.nom, 
+    TREAT(VALUE(p) AS T_ALUMNE_GRAU).anys_restants() as anys_que_li_queden
+FROM persones_tab p 
+WHERE VALUE(p) IS OF (T_ALUMNE_GRAU);
+
