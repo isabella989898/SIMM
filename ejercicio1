@@ -1,0 +1,94 @@
+CREATE OR REPLACE TYPE adreca AS OBJECT (
+    carrer VARCHAR2 (100),
+    cuitat VARCHAR2 (50),
+    codi_postal CHAR (5)
+);
+/
+
+CREATE OR REPLACE TYPE telefono FORCE AS OBJECT (
+    tipos VARCHAR2 (20),
+    numero VARCHAR2(15)
+);
+/  
+CREATE OR REPLACE TYPE vec_telefonos FORCE AS VARRAY(2) OF telefono;
+/
+CREATE OR REPLACE TYPE proveidor AS OBJECT (
+    codi NUMBER,
+    nombre VARCHAR2(50),
+    adreca_obj adreca,
+    telefons vec_telefonos,
+    correo_electronico VARCHAR2(100)
+);
+/
+CREATE OR REPLACE TYPE material FORCE AS OBJECT (
+    codi NUMBER,
+    nombre VARCHAR2 (50),
+    descripcion VARCHAR2 (200),
+    costo_unitario NUMBER
+);
+/ 
+CREATE OR REPLACE TYPE linea_compra AS OBJECT (
+    codi NUMBER,
+    ref_material REF material,
+    cantidad NUMBER, 
+    descuento NUMBER,
+    MEMBER FUNCTION subtotal RETURN NUMBER
+);
+/
+
+CREATE OR REPLACE TYPE tabla_lineas AS TABLE OF linea_compra;
+/
+CREATE OR REPLACE TYPE compra AS OBJECT (
+    codi NUMBER,
+    fecha_compra DATE,
+    ref_proveidor REF proveidor,
+    t_lineas tabla_lineas,
+    MEMBER FUNCTION costo_total RETURN NUMBER
+);
+/
+CREATE OR REPLACE TYPE BODY linea_compra AS
+    MEMBER FUNCTION subtotal RETURN NUMBER IS
+        v_precio NUMBER;
+    BEGIN
+        SELECT m.costo_unitario INTO v_precio
+        FROM materiales_tab m
+        WHERE REF(M) = self.ref_material;
+        RETURN (v_precio * self.cantidad) - self.descuento;
+        END;
+    END;
+/
+CREATE OR REPLACE TYPE BODY compra AS
+    MEMBER FUNCTION costo_total RETURN NUMBER IS
+        v_total NUMBER := 0;
+        v_subtotal NUMBER;
+    BEGIN
+        FOR i IN 1..SELF.t_lineas.COUNT LOOP
+        v_subtotal := self.t_lineas(i).subtotal();
+        v_total := v_total + v_subtotal;
+        END LOOP;
+        
+        RETURN v_total;
+    END;
+END;
+/
+-- Insertamos un material
+INSERT INTO materiales_tab VALUES (material(1, 'Cemento', 'Saco 25kg', 12.50));
+
+-- Insertamos un proveedor (con su dirección y sus dos teléfonos)
+INSERT INTO proveidors_tab VALUES (
+    proveidor(100, 'Suministros Paco', 
+    adreca('Calle Mayor 1', 'Barcelona', '08001'), 
+    vec_telefonos(telefono('Fijo', '933333333'), telefono('Móvil', '600000000')), 'paco@suministros.com')
+);
+
+INSERT INTO compres_tab 
+SELECT 2, SYSDATE, REF(p), 
+       tabla_lineas(linea_compra(1, (SELECT REF(m) FROM materiales_tab m WHERE codi = 4), 10, 5))
+FROM proveidors_tab p WHERE p.codi = 100;
+/
+SELECT 
+    c.codi AS factura_nro,
+    c.fecha_compra,
+    c.costo_total() AS total_a_pagar
+FROM compres_tab c;
+/
